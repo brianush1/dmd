@@ -500,6 +500,9 @@ immutable Msgtable[] msgtable =
     { "isCopyable" },
     { "toType" },
     { "parameters" },
+    { "glsl__source" },
+    { "glsl__rename" },
+    { "glsl__global" },
 
     // For C++ mangling
     { "allocator" },

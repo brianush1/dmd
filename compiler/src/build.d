@@ -1550,6 +1550,15 @@ auto sourceFiles()
             statementsem.d staticassert.d staticcond.d stmtstate.d target.d templateparamsem.d traits.d
             transitivevisitor.d typesem.d typinf.d utils.d visitor.d foreachvar.d
             cparse.d
+            arsd/mvd.d
+            shader/package.d
+            shader/glsl/frontend.d
+            shader/glsl/ir.d
+            shader/glsl/irdump.d
+            shader/glsl/compiler.d
+            shader/glsl/optimizer.d
+            shader/glsl/output.d
+            shader/glsl/inliner.d
         "),
         backendHeaders: fileArray(env["C"], "
             cc.d cdef.d cgcv.d code.d cv4.d dt.d el.d global.d

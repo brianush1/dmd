@@ -560,6 +560,9 @@ private int tryMain(size_t argc, const(char)** argv, ref Param params)
     if (global.params.cxxhdr.doOutput)
         genCppHdrFiles(modules);
 
+    import dmd.shader : writeShaderFiles;
+    writeShaderFiles(modules);
+
     if (global.errors)
         fatal();
 

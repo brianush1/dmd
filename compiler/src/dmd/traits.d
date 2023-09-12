@@ -2073,6 +2073,78 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
         auto tup = new TupleExp(e.loc, exps);
         return tup.expressionSemantic(sc);
     }
+    if (e.ident == Id.glsl__source)
+    {
+        import dmd.shader : shaderTraits, ShaderTraits;
+
+        TypeClass shader = isType((*e.args)[0]).isTypeClass;
+
+        OutBuffer mangleBuf;
+        mangleToBuffer(shader.sym, &mangleBuf);
+        string mangled = mangleBuf[].idup;
+        assert(mangled[0 .. 2] != "_D");
+
+        Expression ex = isExpression((*e.args)[1]);
+        ex = ex.ctfeInterpret();
+        string stageName = ex.isStringExp.toUTF8(sc).peekString.idup;
+
+        char[] buffer = new char[1024 * 1024]; // 1 MiB should be enough, right?
+        auto str = new StringExp(e.loc, buffer);
+        str.type = Type.tstring;
+
+        if (mangled !in shaderTraits)
+            shaderTraits[mangled] = ShaderTraits.init;
+        if (stageName !in shaderTraits[mangled].sources)
+            shaderTraits[mangled].sources[stageName] = [];
+        shaderTraits[mangled].sources[stageName] ~= buffer;
+
+        return str;
+    }
+    if (e.ident == Id.glsl__rename)
+    {
+        import dmd.shader : shaderTraits, ShaderTraits;
+
+        TypeClass shader = isType((*e.args)[0]).isTypeClass;
+
+        OutBuffer mangleBuf;
+        mangleToBuffer(shader.sym, &mangleBuf);
+        string mangled = mangleBuf[].idup;
+        assert(mangled[0 .. 2] != "_D");
+
+        Expression ex = isExpression((*e.args)[1]);
+        ex = ex.ctfeInterpret();
+        string varName = ex.isStringExp.toUTF8(sc).peekString.idup;
+
+        char[] buffer = new char[256];
+        auto str = new StringExp(e.loc, buffer);
+        str.type = Type.tstring;
+
+        if (mangled !in shaderTraits)
+            shaderTraits[mangled] = ShaderTraits.init;
+        if (varName !in shaderTraits[mangled].renames)
+            shaderTraits[mangled].renames[varName] = [];
+        shaderTraits[mangled].renames[varName] ~= buffer;
+
+        return str;
+    }
+    if (e.ident == Id.glsl__global)
+    {
+        import dmd.shader : globalTraits;
+
+        Expression ex = isExpression((*e.args)[0]);
+        ex = ex.ctfeInterpret();
+        string varName = ex.isStringExp.toUTF8(sc).peekString.idup;
+
+        char[] buffer = new char[256];
+        auto str = new StringExp(e.loc, buffer);
+        str.type = Type.tstring;
+
+        if (varName !in globalTraits)
+            globalTraits[varName] = [];
+        globalTraits[varName] ~= buffer;
+
+        return str;
+    }
 
     /* Can't find the identifier. Try a spell check for a better error message
      */
@@ -2223,7 +2295,7 @@ private void traitNotFound(TraitsExp e)
         initialized = true;     // lazy initialization
 
         // All possible traits
-        __gshared Identifier*[59] idents =
+        __gshared Identifier*[62] idents =
         [
             &Id.allMembers,
             &Id.child,
@@ -2283,6 +2355,9 @@ private void traitNotFound(TraitsExp e)
             &Id.isVirtualMethod,
             &Id.isZeroInit,
             &Id.parameters,
+            &Id.glsl__source,
+            &Id.glsl__rename,
+            &Id.glsl__global,
             &Id.parent,
         ];
 
