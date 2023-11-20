@@ -10,6 +10,7 @@
 
 #pragma once
 
+class ErrorSink;
 class Identifier;
 class Module;
 class Statement;
@@ -60,6 +61,9 @@ enum class SCOPE
     Cfile         = 0x0800,  // C semantics apply
     free          = 0x8000,  // is on free list
     fullinst      = 0x10000, // fully instantiate templates
+    ctfeBlock     = 0x20000, // inside a `if (__ctfe)` block
+    dip1000       = 0x40000, // dip1000 errors enabled for this scope
+    dip25         = 0x80000, // dip25 errors enabled for this scope
 };
 
 struct Scope
@@ -85,6 +89,7 @@ struct Scope
     d_bool inLoop;                // true if inside a loop (where constructor calls aren't allowed)
     int intypeof;               // in typeof(exp)
     VarDeclaration *lastVar;    // Previous symbol used to prevent goto-skips-init
+    ErrorSink *eSink;           // sink for error messages
 
     /* If  minst && !tinst, it's in definitely non-speculative scope (eg. module member scope).
      * If !minst && !tinst, it's in definitely speculative scope (eg. template constraint).

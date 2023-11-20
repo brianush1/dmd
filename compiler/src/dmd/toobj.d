@@ -19,12 +19,13 @@ import core.stdc.time;
 import dmd.root.array;
 import dmd.common.outbuffer;
 import dmd.root.rmem;
-import dmd.root.rootobject;
+import dmd.rootobject;
 
 import dmd.aggregate;
 import dmd.arraytypes;
 import dmd.astenums;
 import dmd.attrib;
+import dmd.dcast;
 import dmd.dclass;
 import dmd.declaration;
 import dmd.denum;
@@ -35,6 +36,7 @@ import dmd.dstruct;
 import dmd.dsymbol;
 import dmd.dtemplate;
 import dmd.errors;
+import dmd.errorsink;
 import dmd.expression;
 import dmd.func;
 import dmd.globals;
@@ -46,6 +48,7 @@ import dmd.location;
 import dmd.mtype;
 import dmd.nspace;
 import dmd.objc_glue;
+import dmd.opover;
 import dmd.statement;
 import dmd.staticassert;
 import dmd.target;
@@ -73,10 +76,6 @@ import dmd.backend.ty;
 import dmd.backend.type;
 
 extern (C++):
-
-alias toSymbol = dmd.tocsym.toSymbol;
-alias toSymbol = dmd.glue.toSymbol;
-
 
 /* ================================================================== */
 
@@ -250,23 +249,41 @@ void write_instance_pointers(Type type, Symbol *s, uint offset)
         return;
 
     Array!(ulong) data;
-    ulong sz = getTypePointerBitmap(Loc.initial, type, &data);
+    const ulong sz = getTypePointerBitmap(Loc.initial, type, data, global.errorSink);
     if (sz == ulong.max)
         return;
 
     const bytes_size_t = cast(size_t)Type.tsize_t.size(Loc.initial);
     const bits_size_t = bytes_size_t * 8;
     auto words = cast(size_t)(sz / bytes_size_t);
-    for (size_t i = 0; i < data.length; i++)
+    foreach (i, const element; data[])
     {
         size_t bits = words < bits_size_t ? words : bits_size_t;
-        for (size_t b = 0; b < bits; b++)
-            if (data[i] & (1L << b))
+        foreach (size_t b; 0 .. bits)
+            if (element & (1L << b))
             {
                 auto off = cast(uint) ((i * bits_size_t + b) * bytes_size_t);
                 objmod.write_pointerRef(s, off + offset);
             }
         words -= bits;
+    }
+}
+
+/****************************************************
+ * Put out instance of the `TypeInfo` object associated with `t` if it
+ * hasn't already been generated
+ * Params:
+ *      e   = if not null, then expression for pretty-printing errors
+ *      loc = the location for reporting line numbers in errors
+ *      t   = the type to generate the `TypeInfo` object for
+ */
+void TypeInfo_toObjFile(Expression e, const ref Loc loc, Type t)
+{
+    // printf("TypeInfo_toObjFIle() %s\n", torig.toChars());
+    if (genTypeInfo(e, loc, t, null))
+    {
+        // generate a COMDAT for other TypeInfos not available as builtins in druntime
+        toObjFile(t.vtinfo, global.params.multiobj);
     }
 }
 
@@ -284,7 +301,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
     public:
         bool multiobj;
 
-        this(bool multiobj) scope
+        this(bool multiobj) scope @safe
         {
             this.multiobj = multiobj;
         }
@@ -315,7 +332,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             if (cd.type.ty == Terror)
             {
-                cd.error("had semantic errors when compiling");
+                .error(cd.loc, "%s `%s` had semantic errors when compiling", cd.kind, cd.toPrettyChars);
                 return;
             }
 
@@ -383,7 +400,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             // Put out the TypeInfo
             if (gentypeinfo)
-                genTypeInfo(null, cd.loc, cd.type, null);
+                TypeInfo_toObjFile(null, cd.loc, cd.type);
             //toObjFile(cd.type.vtinfo, multiobj);
 
             if (genclassinfo)
@@ -433,7 +450,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             if (id.type.ty == Terror)
             {
-                id.error("had semantic errors when compiling");
+                .error(id.loc, "had semantic errors when compiling", id.kind, id.toPrettyChars);
                 return;
             }
 
@@ -466,7 +483,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             // Put out the TypeInfo
             if (gentypeinfo)
             {
-                genTypeInfo(null, id.loc, id.type, null);
+                TypeInfo_toObjFile(null, id.loc, id.type);
                 id.type.vtinfo.accept(this);
             }
 
@@ -482,7 +499,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             if (sd.type.ty == Terror)
             {
-                sd.error("had semantic errors when compiling");
+                .error(sd.loc, "%s `%s` had semantic errors when compiling", sd.kind, sd.toPrettyChars);
                 return;
             }
 
@@ -502,7 +519,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
                     toDebug(sd);
 
                 if (global.params.useTypeInfo && Type.dtypeinfo)
-                    genTypeInfo(null, sd.loc, sd.type, null);
+                    TypeInfo_toObjFile(null, sd.loc, sd.type);
 
                 // Generate static initializer
                 auto sinit = toInitializer(sd);
@@ -554,7 +571,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             if (vd.type.ty == Terror)
             {
-                vd.error("had semantic errors when compiling");
+                .error(vd.loc, "%s `%s` had semantic errors when compiling", vd.kind, vd.toPrettyChars);
                 return;
             }
 
@@ -577,12 +594,12 @@ void toObjFile(Dsymbol ds, bool multiobj)
             const sz64 = vd.type.size(vd.loc);
             if (sz64 == SIZE_INVALID)
             {
-                vd.error("size overflow");
+                .error(vd.loc, "%s `%s` size overflow", vd.kind, vd.toPrettyChars);
                 return;
             }
             if (sz64 > target.maxStaticDataSize)
             {
-                vd.error("size of 0x%llx exceeds max allowed size 0x%llx", sz64, target.maxStaticDataSize);
+                .error(vd.loc, "%s `%s` size of 0x%llx exceeds max allowed size 0x%llx", vd.kind, vd.toPrettyChars, sz64, target.maxStaticDataSize);
             }
             uint sz = cast(uint)sz64;
 
@@ -618,7 +635,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             }
 
             auto dtb = DtBuilder(0);
-            if (config.objfmt == OBJ_MACH && target.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread)
+            if (config.objfmt == OBJ_MACH && target.isX86_64 && (s.Stype.Tty & mTYLINK) == mTYthread)
             {
                 tlsToDt(vd, s, sz, dtb, isCfile);
             }
@@ -670,7 +687,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
 
             if (ed.errors || ed.type.ty == Terror)
             {
-                ed.error("had semantic errors when compiling");
+                .error(ed.loc, "%s `%s` had semantic errors when compiling", ed.kind, ed.toPrettyChars);
                 return;
             }
 
@@ -683,7 +700,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
                 toDebug(ed);
 
             if (global.params.useTypeInfo && Type.dtypeinfo)
-                genTypeInfo(null, ed.loc, ed.type, null);
+                TypeInfo_toObjFile(null, ed.loc, ed.type);
 
             TypeEnum tc = cast(TypeEnum)ed.type;
             if (!tc.sym.members || ed.type.isZeroInit(Loc.initial))
@@ -776,7 +793,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
                  * The linker will then automatically
                  * search that library, too.
                  */
-                if (!obj_includelib(name))
+                if (!obj_includelib(name[0 .. strlen(name)]))
                 {
                     /* The format does not allow embedded library names,
                      * so instead append the library name to the list to be passed
@@ -926,7 +943,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
          */
         static void tlsToDt(VarDeclaration vd, Symbol *s, uint sz, ref DtBuilder dtb, bool isCfile)
         {
-            assert(config.objfmt == OBJ_MACH && target.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread);
+            assert(config.objfmt == OBJ_MACH && target.isX86_64 && (s.Stype.Tty & mTYLINK) == mTYthread);
 
             Symbol *tlvInit = createTLVDataSymbol(vd, s);
             auto tlvInitDtb = DtBuilder(0);
@@ -941,7 +958,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             tlvInit.Sdt = tlvInitDtb.finish();
             outdata(tlvInit);
 
-            if (target.is64bit)
+            if (target.isX86_64)
                 tlvInit.Sclass = SC.extern_;
 
             Symbol* tlvBootstrap = objmod.tlv_bootstrap();
@@ -961,7 +978,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
          */
         static Symbol *createTLVDataSymbol(VarDeclaration vd, Symbol *s)
         {
-            assert(config.objfmt == OBJ_MACH && target.is64bit && (s.Stype.Tty & mTYLINK) == mTYthread);
+            assert(config.objfmt == OBJ_MACH && target.isX86_64 && (s.Stype.Tty & mTYLINK) == mTYthread);
 
             // Compute identifier for tlv symbol
             OutBuffer buffer;
@@ -997,7 +1014,7 @@ void toObjFile(Dsymbol ds, bool multiobj)
             final switch (vd.resolvedLinkage())
             {
                 case LINK.windows:
-                    return target.is64bit ? mTYman_c : mTYman_std;
+                    return target.isX86_64 ? mTYman_c : mTYman_std;
 
                 case LINK.objc:
                 case LINK.c:
@@ -1073,7 +1090,7 @@ private bool finishVtbl(ClassDeclaration cd)
                 continue;
             // Hiding detected: same name, overlapping specializations
             TypeFunction tf = fd.type.toTypeFunction();
-            cd.error("use of `%s%s` is hidden by `%s`; use `alias %s = %s.%s;` to introduce base class overload set",
+            .error(cd.loc, "%s `%s` use of `%s%s` is hidden by `%s`; use `alias %s = %s.%s;` to introduce base class overload set", cd.kind, cd.toPrettyChars,
                 fd.toPrettyChars(),
                 parametersTypeToChars(tf.parameterList),
                 cd.toChars(),
@@ -1221,7 +1238,7 @@ private void genClassInfoForClass(ClassDeclaration cd, Symbol* sinit)
         if (Type.typeinfoclass.structsize != target.classinfosize)
         {
             debug printf("target.classinfosize = x%x, Type.typeinfoclass.structsize = x%x\n", offset, Type.typeinfoclass.structsize);
-            cd.error("mismatch between dmd and object.d or object.di found. Check installation and import paths with -v compiler switch.");
+            .error(cd.loc, "%s `%s` mismatch between dmd and object.d or object.di found. Check installation and import paths with -v compiler switch.", cd.kind, cd.toPrettyChars);
             fatal();
         }
     }
@@ -1495,7 +1512,7 @@ private void genClassInfoForInterface(InterfaceDeclaration id)
         {
             if (Type.typeinfoclass.structsize != offset)
             {
-                id.error("mismatch between dmd and object.d or object.di found. Check installation and import paths with -v compiler switch.");
+                .error(id.loc, "%s `%s` mismatch between dmd and object.d or object.di found. Check installation and import paths with -v compiler switch.", id.kind, id.toPrettyChars);
                 fatal();
             }
         }

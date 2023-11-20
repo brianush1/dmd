@@ -32,7 +32,8 @@ import dmd.declaration;
 import dmd.dmodule;
 import dmd.dscope;
 import dmd.dsymbol;
-import dmd.dsymbolsem : dsymbolSemantic;
+import dmd.dsymbolsem;
+import dmd.errors;
 import dmd.expression;
 import dmd.expressionsem;
 import dmd.func;
@@ -45,7 +46,6 @@ import dmd.mtype;
 import dmd.objc; // for objc.addSymbols
 import dmd.common.outbuffer;
 import dmd.root.array; // for each
-import dmd.tokens;
 import dmd.visitor;
 
 /***********************************************************
@@ -57,18 +57,18 @@ extern (C++) abstract class AttribDeclaration : Dsymbol
 {
     Dsymbols* decl;     /// Dsymbol's affected by this AttribDeclaration
 
-    extern (D) this(Dsymbols* decl)
+    extern (D) this(Dsymbols* decl) @safe
     {
         this.decl = decl;
     }
 
-    extern (D) this(const ref Loc loc, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Dsymbols* decl) @safe
     {
         super(loc, null);
         this.decl = decl;
     }
 
-    extern (D) this(const ref Loc loc, Identifier ident, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Identifier ident, Dsymbols* decl) @safe
     {
         super(loc, ident);
         this.decl = decl;
@@ -121,18 +121,6 @@ extern (C++) abstract class AttribDeclaration : Dsymbol
     Scope* newScope(Scope* sc)
     {
         return sc;
-    }
-
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        Dsymbols* d = include(sc);
-        if (d)
-        {
-            Scope* sc2 = newScope(sc);
-            d.foreachDsymbol( s => s.addMember(sc2, sds) );
-            if (sc2 != sc)
-                sc2.pop();
-        }
     }
 
     override void setScope(Scope* sc)
@@ -228,13 +216,13 @@ extern (C++) class StorageClassDeclaration : AttribDeclaration
 {
     StorageClass stc;
 
-    extern (D) this(StorageClass stc, Dsymbols* decl)
+    extern (D) this(StorageClass stc, Dsymbols* decl) @safe
     {
         super(decl);
         this.stc = stc;
     }
 
-    extern (D) this(const ref Loc loc, StorageClass stc, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, StorageClass stc, Dsymbols* decl) @safe
     {
         super(loc, decl);
         this.stc = stc;
@@ -295,34 +283,6 @@ extern (C++) class StorageClassDeclaration : AttribDeclaration
         return t;
     }
 
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        Dsymbols* d = include(sc);
-        if (d)
-        {
-            Scope* sc2 = newScope(sc);
-
-            d.foreachDsymbol( (s)
-            {
-                //printf("\taddMember %s to %s\n", s.toChars(), sds.toChars());
-                // STC.local needs to be attached before the member is added to the scope (because it influences the parent symbol)
-                if (auto decl = s.isDeclaration())
-                {
-                    decl.storage_class |= stc & STC.local;
-                    if (auto sdecl = s.isStorageClassDeclaration()) // TODO: why is this not enough to deal with the nested case?
-                    {
-                        sdecl.stc |= stc & STC.local;
-                    }
-                }
-                s.addMember(sc2, sds);
-            });
-
-            if (sc2 != sc)
-                sc2.pop();
-        }
-
-    }
-
     override inout(StorageClassDeclaration) isStorageClassDeclaration() inout
     {
         return this;
@@ -347,7 +307,7 @@ extern (C++) final class DeprecatedDeclaration : StorageClassDeclaration
     Expression msg;         /// deprecation message
     const(char)* msgstr;    /// cached string representation of msg
 
-    extern (D) this(Expression msg, Dsymbols* decl)
+    extern (D) this(Expression msg, Dsymbols* decl) @safe
     {
         super(STC.deprecated_, decl);
         this.msg = msg;
@@ -402,14 +362,14 @@ extern (C++) final class LinkDeclaration : AttribDeclaration
 {
     LINK linkage; /// either explicitly set or `default_`
 
-    extern (D) this(const ref Loc loc, LINK linkage, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, LINK linkage, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         //printf("LinkDeclaration(linkage = %d, decl = %p)\n", linkage, decl);
         this.linkage = linkage;
     }
 
-    static LinkDeclaration create(const ref Loc loc, LINK p, Dsymbols* decl)
+    static LinkDeclaration create(const ref Loc loc, LINK p, Dsymbols* decl) @safe
     {
         return new LinkDeclaration(loc, p, decl);
     }
@@ -454,7 +414,7 @@ extern (C++) final class CPPMangleDeclaration : AttribDeclaration
 {
     CPPMANGLE cppmangle;
 
-    extern (D) this(const ref Loc loc, CPPMANGLE cppmangle, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, CPPMANGLE cppmangle, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         //printf("CPPMangleDeclaration(cppmangle = %d, decl = %p)\n", cppmangle, decl);
@@ -524,19 +484,19 @@ extern (C++) final class CPPNamespaceDeclaration : AttribDeclaration
     /// CTFE-able expression, resolving to `TupleExp` or `StringExp`
     Expression exp;
 
-    extern (D) this(const ref Loc loc, Identifier ident, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Identifier ident, Dsymbols* decl) @safe
     {
         super(loc, ident, decl);
     }
 
-    extern (D) this(const ref Loc loc, Expression exp, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Expression exp, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         this.exp = exp;
     }
 
     extern (D) this(const ref Loc loc, Identifier ident, Expression exp, Dsymbols* decl,
-                    CPPNamespaceDeclaration parent)
+                    CPPNamespaceDeclaration parent) @safe
     {
         super(loc, ident, decl);
         this.exp = exp;
@@ -597,7 +557,7 @@ extern (C++) final class VisibilityDeclaration : AttribDeclaration
      *  visibility = visibility attribute data
      *  decl = declarations which are affected by this visibility attribute
      */
-    extern (D) this(const ref Loc loc, Visibility visibility, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Visibility visibility, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         this.visibility = visibility;
@@ -640,37 +600,6 @@ extern (C++) final class VisibilityDeclaration : AttribDeclaration
         return createNewScope(sc, sc.stc, sc.linkage, sc.cppmangle, this.visibility, 1, sc.aligndecl, sc.inlining);
     }
 
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        if (pkg_identifiers)
-        {
-            Dsymbol tmp;
-            Package.resolve(pkg_identifiers, &tmp, null);
-            visibility.pkg = tmp ? tmp.isPackage() : null;
-            pkg_identifiers = null;
-        }
-        if (visibility.kind == Visibility.Kind.package_ && visibility.pkg && sc._module)
-        {
-            Module m = sc._module;
-
-            // https://issues.dlang.org/show_bug.cgi?id=17441
-            // While isAncestorPackageOf does an equality check, the fix for the issue adds a check to see if
-            // each package's .isModule() properites are equal.
-            //
-            // Properties generated from `package(foo)` i.e. visibility.pkg have .isModule() == null.
-            // This breaks package declarations of the package in question if they are declared in
-            // the same package.d file, which _do_ have a module associated with them, and hence a non-null
-            // isModule()
-            if (!m.isPackage() || !visibility.pkg.ident.equals(m.isPackage().ident))
-            {
-                Package pkg = m.parent ? m.parent.isPackage() : null;
-                if (!pkg || !visibility.pkg.isAncestorPackageOf(pkg))
-                    error("does not bind to one of ancestor packages of module `%s`", m.toPrettyChars(true));
-            }
-        }
-        return AttribDeclaration.addMember(sc, sds);
-    }
-
     override const(char)* kind() const
     {
         return "visibility attribute";
@@ -680,7 +609,7 @@ extern (C++) final class VisibilityDeclaration : AttribDeclaration
     {
         assert(visibility.kind > Visibility.Kind.undefined);
         OutBuffer buf;
-        visibilityToBuffer(&buf, visibility);
+        visibilityToBuffer(buf, visibility);
         return buf.extractChars();
     }
 
@@ -720,13 +649,13 @@ extern (C++) final class AlignDeclaration : AttribDeclaration
         }
     }
 
-    extern (D) this(const ref Loc loc, Expressions* exps, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Expressions* exps, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         this.exps = exps;
     }
 
-    extern (D) this(const ref Loc loc, structalign_t salign, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, structalign_t salign, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         this.salign = salign;
@@ -762,7 +691,7 @@ extern (C++) final class AnonDeclaration : AttribDeclaration
     uint anonstructsize;    /// size of anonymous struct
     uint anonalignsize;     /// size of anonymous struct for alignment purposes
 
-    extern (D) this(const ref Loc loc, bool isunion, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, bool isunion, Dsymbols* decl) @safe
     {
         super(loc, null, decl);
         this.isunion = isunion;
@@ -839,10 +768,10 @@ extern (C++) final class AnonDeclaration : AttribDeclaration
             /* Given the anon 'member's size and alignment,
              * go ahead and place it.
              */
-            anonoffset = AggregateDeclaration.placeField(
-                &fieldState.offset,
+            anonoffset = placeField(
+                fieldState.offset,
                 anonstructsize, anonalignsize, alignment,
-                &ad.structsize, &ad.alignsize,
+                ad.structsize, ad.alignsize,
                 isunion);
 
             // Add to the anon fields the base offset of this anonymous aggregate
@@ -882,7 +811,7 @@ extern (C++) final class PragmaDeclaration : AttribDeclaration
 {
     Expressions* args;      /// parameters of this pragma
 
-    extern (D) this(const ref Loc loc, Identifier ident, Expressions* args, Dsymbols* decl)
+    extern (D) this(const ref Loc loc, Identifier ident, Expressions* args, Dsymbols* decl) @safe
     {
         super(loc, ident, decl);
         this.args = args;
@@ -928,7 +857,7 @@ extern (C++) class ConditionalDeclaration : AttribDeclaration
     Condition condition;    /// condition deciding whether decl or elsedecl applies
     Dsymbols* elsedecl;     /// array of Dsymbol's for else block
 
-    extern (D) this(const ref Loc loc, Condition condition, Dsymbols* decl, Dsymbols* elsedecl)
+    extern (D) this(const ref Loc loc, Condition condition, Dsymbols* decl, Dsymbols* elsedecl) @safe
     {
         super(loc, null, decl);
         //printf("ConditionalDeclaration::ConditionalDeclaration()\n");
@@ -1006,7 +935,7 @@ extern (C++) final class StaticIfDeclaration : ConditionalDeclaration
     private bool addisdone = false; /// true if members have been added to scope
     private bool onStack = false;   /// true if a call to `include` is currently active
 
-    extern (D) this(const ref Loc loc, Condition condition, Dsymbols* decl, Dsymbols* elsedecl)
+    extern (D) this(const ref Loc loc, Condition condition, Dsymbols* decl, Dsymbols* elsedecl) @safe
     {
         super(loc, condition, decl, elsedecl);
         //printf("StaticIfDeclaration::StaticIfDeclaration()\n");
@@ -1052,23 +981,6 @@ extern (C++) final class StaticIfDeclaration : ConditionalDeclaration
         {
             return ConditionalDeclaration.include(sc);
         }
-    }
-
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        //printf("StaticIfDeclaration::addMember() '%s'\n", toChars());
-        /* This is deferred until the condition evaluated later (by the include() call),
-         * so that expressions in the condition can refer to declarations
-         * in the same scope, such as:
-         *
-         * template Foo(int i)
-         * {
-         *     const int j = i + 1;
-         *     static if (j == 3)
-         *         const int k;
-         * }
-         */
-        this.scopesym = sds;
     }
 
     override void setScope(Scope* sc)
@@ -1120,7 +1032,7 @@ extern (C++) final class StaticForeachDeclaration : AttribDeclaration
     bool cached = false;
     Dsymbols* cache = null;
 
-    extern (D) this(StaticForeach sfe, Dsymbols* decl)
+    extern (D) this(StaticForeach sfe, Dsymbols* decl) @safe
     {
         super(sfe.loc, null, decl);
         this.sfe = sfe;
@@ -1186,12 +1098,6 @@ extern (C++) final class StaticForeachDeclaration : AttribDeclaration
         return d;
     }
 
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        // used only for caching the enclosing symbol
-        this.scopesym = sds;
-    }
-
     override void addComment(const(char)* comment)
     {
         // do nothing
@@ -1251,7 +1157,7 @@ extern(C++) final class ForwardingAttribDeclaration : AttribDeclaration
 {
     ForwardingScopeDsymbol sym = null;
 
-    this(Dsymbols* decl)
+    this(Dsymbols* decl) @safe
     {
         super(decl);
         sym = new ForwardingScopeDsymbol();
@@ -1264,15 +1170,6 @@ extern(C++) final class ForwardingAttribDeclaration : AttribDeclaration
     override Scope* newScope(Scope* sc)
     {
         return sc.push(sym);
-    }
-
-    /***************************************
-     * Lazily initializes the scope to forward to.
-     */
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        sym.parent = sds;
-        return super.addMember(sc, sym);
     }
 
     override inout(ForwardingAttribDeclaration) isForwardingAttribDeclaration() inout
@@ -1299,7 +1196,7 @@ extern (C++) final class MixinDeclaration : AttribDeclaration
     ScopeDsymbol scopesym;
     bool compiled;
 
-    extern (D) this(const ref Loc loc, Expressions* exps)
+    extern (D) this(const ref Loc loc, Expressions* exps) @safe
     {
         super(loc, null, null);
         //printf("MixinDeclaration(loc = %d)\n", loc.linnum);
@@ -1310,12 +1207,6 @@ extern (C++) final class MixinDeclaration : AttribDeclaration
     {
         //printf("MixinDeclaration::syntaxCopy('%s')\n", toChars());
         return new MixinDeclaration(loc, Expression.arraySyntaxCopy(exps));
-    }
-
-    override void addMember(Scope* sc, ScopeDsymbol sds)
-    {
-        //printf("MixinDeclaration::addMember(sc = %p, sds = %p, memnum = %d)\n", sc, sds, memnum);
-        this.scopesym = sds;
     }
 
     override void setScope(Scope* sc)
@@ -1348,7 +1239,7 @@ extern (C++) final class UserAttributeDeclaration : AttribDeclaration
 {
     Expressions* atts;
 
-    extern (D) this(Expressions* atts, Dsymbols* decl)
+    extern (D) this(Expressions* atts, Dsymbols* decl) @safe
     {
         super(decl);
         this.atts = atts;
@@ -1474,12 +1365,12 @@ extern (C++) final class UserAttributeDeclaration : AttribDeclaration
             {
                 if (sym.isCPPNamespaceDeclaration() || sym.isNspace())
                 {
-                    exp.error("`@%s` cannot be applied to namespaces", Id.udaGNUAbiTag.toChars());
+                    .error(exp.loc, "`@%s` cannot be applied to namespaces", Id.udaGNUAbiTag.toChars());
                     sym.errors = true;
                 }
                 else if (linkage != LINK.cpp)
                 {
-                    exp.error("`@%s` can only apply to C++ symbols", Id.udaGNUAbiTag.toChars());
+                    .error(exp.loc, "`@%s` can only apply to C++ symbols", Id.udaGNUAbiTag.toChars());
                     sym.errors = true;
                 }
                 // Only one `@gnuAbiTag` is allowed by semantic2

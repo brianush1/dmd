@@ -33,7 +33,6 @@ import dmd.backend.type;
 import dmd.backend.dlist;
 import dmd.backend.dvec;
 
-extern (C++):
 
 nothrow:
 @safe:
@@ -475,7 +474,6 @@ void WRblock(block *b)
  * Number the blocks starting at 1.
  * So much more convenient than pointer values.
  */
-@safe
 void numberBlocks(block *startblock)
 {
     uint number = 0;

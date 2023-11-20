@@ -37,8 +37,6 @@ static if (NTEXCEPTIONS)
 else
     enum SCPP_OR_NTEXCEPTIONS = false;
 
-extern(C++):
-
 nothrow:
 @safe:
 
@@ -1056,7 +1054,6 @@ private void brrear()
  *      dfo = array to fill in in DFO
  *      startblock = list of blocks
  */
-@safe
 void compdfo(ref Barray!(block*) dfo, block* startblock)
 {
     debug if (debugc) printf("compdfo()\n");

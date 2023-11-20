@@ -29,6 +29,7 @@ import dmd.dsymbolsem;
 import dmd.dtemplate;
 import dmd.expression;
 import dmd.errors;
+import dmd.errorsink;
 import dmd.func;
 import dmd.globals;
 import dmd.id;
@@ -65,13 +66,15 @@ enum SCOPE
 
     fullinst      = 0x10000,  /// fully instantiate templates
     ctfeBlock     = 0x20000,  /// inside a `if (__ctfe)` block
+    dip1000       = 0x40000,  /// dip1000 errors enabled for this scope
+    dip25         = 0x80000,  /// dip25 errors enabled for this scope
 }
 
 /// Flags that are carried along with a scope push()
 private enum PersistentFlags =
     SCOPE.contract | SCOPE.debug_ | SCOPE.ctfe | SCOPE.compile | SCOPE.constraint |
     SCOPE.noaccesscheck | SCOPE.ignoresymbolvisibility |
-    SCOPE.Cfile | SCOPE.ctfeBlock;
+    SCOPE.Cfile | SCOPE.ctfeBlock | SCOPE.dip1000 | SCOPE.dip25;
 
 extern (C++) struct Scope
 {
@@ -96,6 +99,7 @@ extern (C++) struct Scope
     bool inLoop;                    /// true if inside a loop (where constructor calls aren't allowed)
     int intypeof;                   /// in typeof(exp)
     VarDeclaration lastVar;         /// Previous symbol used to prevent goto-skips-init
+    ErrorSink eSink;                /// sink for error messages
 
     /* If  minst && !tinst, it's in definitely non-speculative scope (eg. module member scope).
      * If !minst && !tinst, it's in definitely speculative scope (eg. template constraint).
@@ -158,7 +162,7 @@ extern (C++) struct Scope
         return new Scope();
     }
 
-    extern (D) static Scope* createGlobal(Module _module)
+    extern (D) static Scope* createGlobal(Module _module, ErrorSink eSink)
     {
         Scope* sc = Scope.alloc();
         *sc = Scope.init;
@@ -166,12 +170,18 @@ extern (C++) struct Scope
         sc.minst = _module;
         sc.scopesym = new ScopeDsymbol();
         sc.scopesym.symtab = new DsymbolTable();
+        sc.eSink = eSink;
+        assert(eSink);
         // Add top level package as member of this global scope
         Dsymbol m = _module;
         while (m.parent)
             m = m.parent;
         m.addMember(null, sc.scopesym);
         m.parent = null; // got changed by addMember()
+        if (global.params.useDIP1000 == FeatureState.enabled)
+            sc.flags |= SCOPE.dip1000;
+        if (global.params.useDIP25 == FeatureState.enabled)
+            sc.flags |= SCOPE.dip25;
         if (_module.filetype == FileType.c)
             sc.flags |= SCOPE.Cfile;
         // Create the module scope underneath the global scope
@@ -475,12 +485,6 @@ extern (C++) struct Scope
                             s = *ps;
                         }
                     }
-                    if (!(flags & (SearchImportsOnly | IgnoreErrors)) &&
-                        ident == Id.length && sc.scopesym.isArrayScopeSymbol() &&
-                        sc.enclosing && sc.enclosing.search(loc, ident, null, flags))
-                    {
-                        warning(s.loc, "array `length` hides other `length` name in outer scope");
-                    }
                     //printMsg("\tfound local", s);
                     if (pscopesym)
                         *pscopesym = sc.scopesym;
@@ -614,7 +618,7 @@ extern (C++) struct Scope
      * Returns:
      *  innermost scope, null if none
      */
-    extern (D) Scope* inner() return
+    extern (D) Scope* inner() return @safe
     {
         for (Scope* sc = &this; sc; sc = sc.enclosing)
         {
@@ -670,7 +674,7 @@ extern (C++) struct Scope
     /********************************************
      * Search enclosing scopes for ScopeDsymbol.
      */
-    extern (D) ScopeDsymbol getScopesym()
+    extern (D) ScopeDsymbol getScopesym() @safe
     {
         for (Scope* sc = &this; sc; sc = sc.enclosing)
         {
@@ -683,7 +687,7 @@ extern (C++) struct Scope
     /********************************************
      * Search enclosing scopes for ClassDeclaration.
      */
-    extern (D) ClassDeclaration getClassScope()
+    extern (D) ClassDeclaration getClassScope() @safe
     {
         for (Scope* sc = &this; sc; sc = sc.enclosing)
         {
@@ -698,7 +702,7 @@ extern (C++) struct Scope
     /********************************************
      * Search enclosing scopes for ClassDeclaration or StructDeclaration.
      */
-    extern (D) AggregateDeclaration getStructClassScope()
+    extern (D) AggregateDeclaration getStructClassScope() @safe
     {
         for (Scope* sc = &this; sc; sc = sc.enclosing)
         {
@@ -742,7 +746,7 @@ extern (C++) struct Scope
      * where it was declared. So mark the Scope as not
      * to be free'd.
      */
-    extern (D) void setNoFree()
+    extern (D) void setNoFree() @safe
     {
         //int i = 0;
         //printf("Scope::setNoFree(this = %p)\n", this);
@@ -822,5 +826,17 @@ extern (C++) struct Scope
     extern (D) bool needsCodegen()
     {
         return (flags & (SCOPE.ctfe | SCOPE.ctfeBlock | SCOPE.compile)) == 0;
+    }
+
+    /// Returns: whether to raise DIP1000 warnings (FeatureStabe.default) or errors (FeatureState.enabled)
+    extern (D) FeatureState useDIP1000()
+    {
+        return (flags & SCOPE.dip1000) ? FeatureState.enabled : FeatureState.disabled;
+    }
+
+    /// Returns: whether to raise DIP25 warnings (FeatureStabe.default) or errors (FeatureState.enabled)
+    extern (D) FeatureState useDIP25()
+    {
+        return (flags & SCOPE.dip25) ? FeatureState.enabled : FeatureState.disabled;
     }
 }
